@@ -12,6 +12,7 @@ parse_debug = False
 
 items   = []
 vardict = {}
+origdir = ''
 
 # make items
 
@@ -38,7 +39,7 @@ class MakeItem:
                 use = os.environ[key]
             else:
                 print("** Error: undefined variable " + key + " at " + self.location)
-                sys.exit(3)
+                make_exit(3)
             oldval = str
             str = str.replace(tosub, use)
             if parse_debug:
@@ -79,7 +80,7 @@ class MakeItem:
                         op = m.group(2)
             if v1 == None:
                 print("** Error: unable to evaluate expression " + expr + " at " + self.location)
-                sys.exit(3)
+                make_exit(3)
             else:
                 if op == "==":
                     ret = v1 == v2
@@ -95,7 +96,7 @@ class MakeItem:
                     ret = v1 >= v2
                 else:
                     print("** Error: unsupported operator " + op + " at " + self.location)
-                    sys.exit(3)
+                    make_exit(3)
         if parse_debug:
             print("#expr_eval: expr= " + expr)
             print("  v1=" + repr(v1) + " v2=" + repr(v2) + " op=" + repr(op) + " result=" + repr(ret))
@@ -273,6 +274,15 @@ def parse_line(line, filename, num):
         items.append(mi)
         return True
 
+    # explicit rule, no deps
+    m = re.search(r'^(\S+)\s*:\s*$', line, re.ASCII)
+    if m != None:
+        mi = MakeExplicit(fileloc, m.group(1))
+        if parse_debug:
+            print("#PL.EXPLICIT name=" + mi.name + " deps=" + ",".join(mi.deps))
+        items.append(mi)
+        return True
+
     # conditional
     m = re.search(r'^!(\w+)\s+(\S+.*)\s*$', line, re.ASCII)
     if m != None:
@@ -310,6 +320,12 @@ def parse_line(line, filename, num):
     print("** Error: invalid line: " + line + " at " + fileloc)
     return False
     
+def make_exit(code):
+    if verbose:
+        print("Restoring working directory to " + origdir)
+    os.chdir(origdir)
+    sys.exit(code)
+
 def parse_file(filename):
     try:
         tname = filename
@@ -408,7 +424,7 @@ def make_pass():
             elif mi.macro == 'elif':
                 if not condstack:
                     print("** Error: mismatched !elif at " + mi.location)
-                    sys.exit(3)
+                    make_exit(3)
                 if sit == EXEC:
                     sitstack[-1] = SKIPALL
                 elif sit == SKIP:
@@ -418,7 +434,7 @@ def make_pass():
             elif mi.macro == 'else':
                 if not condstack:
                     print("** Error: mismatched !else at " + mi.location)
-                    sys.exit(3)
+                    make_exit(3)
                 if sit == EXEC:
                     sitstack[-1] = SKIP
                 elif sit == SKIP:
@@ -426,12 +442,12 @@ def make_pass():
             elif mi.macro == 'endif':
                 if not condstack:
                     print("** Error: mismatched !endif at " + mi.location)
-                    sys.exit(3)
+                    make_exit(3)
                 condstack = condstack[:-1]
                 sitstack = sitstack[:-1]
             else:
                 print("** Error: unsupported macro " + mi.macro + " at " + mi.location)
-                sys.exit(3)
+                make_exit(3)
             continue
         elif isinstance(mi, MakeAssign) and sit==EXEC:
             mi.eval()
@@ -457,14 +473,23 @@ parser = argparse.ArgumentParser(prog='make.py',
                                  description='python-based Make tool',
                                  epilog='Felipe Bergo, 2024')
 parser.add_argument('target', default='', nargs='*')
-parser.add_argument('-f', dest='makefile', metavar='Makefile', default='Makefile', required=False)
+parser.add_argument('-f', dest='makefile', metavar='file', help='use file as Makefile',     default='Makefile', required=False)
 parser.add_argument('-v', dest='verbose', help='verbose', required=False, action='store_true')
 parser.add_argument('-vp', dest='parsedebug', help='verbose: parser debug', required=False, action='store_true')
+parser.add_argument('-D', dest='workdir', metavar='dir', help='use dir as working directory', required=False)
 
 args = parser.parse_args()
 
 verbose     = args.verbose
 parse_debug = args.parsedebug
+origdir = os.path.abspath(os.getcwd())
+newdir = ''
+
+if args.workdir != None:
+    newdir = os.path.abspath(args.workdir)
+    if verbose:
+        print("Changing working directory to " + newdir)
+    os.chdir(newdir)
 
 if verbose:
     print(args)
@@ -474,7 +499,7 @@ if not parse_file(args.makefile):
     if parse_debug:
         for i in items:
             print(i.describe())
-    sys.exit(2)
+    make_exit(2)
 
 if parse_debug:
     print("*********************")
@@ -492,3 +517,5 @@ if parse_debug:
     print("*********************")
     for i in items:
         print(i.describe())
+
+make_exit(0)
